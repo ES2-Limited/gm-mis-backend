@@ -16,7 +16,7 @@ async function bootstrap() {
   app.enableCors({ origin: true, credentials: true });
 
   const port = parseInt(process.env.PORT || '3001', 10);
-  await app.listen(port);
+  await app.listen(port, '::');
   Logger.log(`SPIN GM-MIS API running on http://localhost:${port}/api`, 'Bootstrap');
 }
 bootstrap();

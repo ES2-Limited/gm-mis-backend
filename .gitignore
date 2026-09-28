@@ -5,7 +5,7 @@ dist/
 !.env.example
 *.log
 npm-debug.log*
-coverage/
+/coverage/
 .nyc_output/
 *.tsbuildinfo
 .DS_Store
