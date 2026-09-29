@@ -1,34 +1,62 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import sgMail from '@sendgrid/mail';
+
+type MailMessage = {
+  to: string;
+  from: { email: string; name: string };
+  subject: string;
+  text: string;
+  html: string;
+};
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
   private enabled = false;
+  private apiKey = '';
   private from: { email: string; name: string };
+  private replyTo?: string;
   private appUrl: string;
 
   constructor(private readonly config: ConfigService) {
-    const key = this.config.get<string>('SENDGRID_API_KEY');
-    if (key) {
-      sgMail.setApiKey(key);
-      this.enabled = true;
-    }
+    this.apiKey = this.config.get<string>('BREVO_API_KEY') || '';
+    this.enabled = !!this.apiKey;
     this.from = {
-      email: this.config.get<string>('SENDGRID_FROM_EMAIL') || 'no-reply@spinproject.ng',
-      name: this.config.get<string>('SENDGRID_FROM_NAME') || 'Spin Project',
+      email: this.config.get<string>('MAIL_FROM_EMAIL') || 'noreply@notify.spinproject.ng',
+      name: this.config.get<string>('MAIL_FROM_NAME') || 'SPIN GRM',
     };
+    this.replyTo = this.config.get<string>('MAIL_REPLY_TO') || undefined;
     this.appUrl = this.config.get<string>('APP_URL') || '';
+    if (!this.enabled) this.logger.warn('BREVO_API_KEY not set — emails are disabled');
+  }
+
+  private async send(msg: MailMessage): Promise<void> {
+    const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+      method: 'POST',
+      headers: {
+        'api-key': this.apiKey,
+        'Content-Type': 'application/json',
+        accept: 'application/json',
+      },
+      body: JSON.stringify({
+        sender: msg.from,
+        to: [{ email: msg.to }],
+        ...(this.replyTo ? { replyTo: { email: this.replyTo } } : {}),
+        subject: msg.subject,
+        textContent: msg.text,
+        htmlContent: msg.html,
+      }),
+    });
+    if (!res.ok) throw new Error(`Brevo ${res.status}: ${await res.text()}`);
   }
 
   async sendUserInvite(to: string, name: string, tempPassword: string): Promise<void> {
     if (!this.enabled) {
-      this.logger.warn(`SendGrid not configured — skipped invite to ${to}`);
+      this.logger.warn(`Email not configured — skipped invite to ${to}`);
       return;
     }
     try {
-      await sgMail.send({
+      await this.send({
         to,
         from: this.from,
         subject: 'Your SPIN Grievance Management System account',
@@ -37,8 +65,7 @@ export class MailService {
       });
       this.logger.log(`Invite sent to ${to}`);
     } catch (err: any) {
-      const body = err?.response?.body ? JSON.stringify(err.response.body) : err?.message;
-      this.logger.error(`Invite to ${to} failed: ${body}`);
+      this.logger.error(`Invite to ${to} failed: ${err?.message}`);
     }
   }
 
@@ -46,7 +73,7 @@ export class MailService {
     if (!this.enabled) return;
     const link = this.appUrl ? `${this.appUrl}/#/cases/${c.id}` : '';
     try {
-      await sgMail.send({
+      await this.send({
         to,
         from: this.from,
         subject: `New grievance assigned to you — ${c.code}`,
@@ -68,18 +95,17 @@ export class MailService {
       });
       this.logger.log(`Assignment email sent to ${to} (${c.code})`);
     } catch (err: any) {
-      const body = err?.response?.body ? JSON.stringify(err.response.body) : err?.message;
-      this.logger.error(`Assignment email to ${to} failed: ${body}`);
+      this.logger.error(`Assignment email to ${to} failed: ${err?.message}`);
     }
   }
 
   async sendOtp(to: string, name: string, code: string, purposeLabel: string, ttlMinutes: number): Promise<void> {
     if (!this.enabled) {
-      this.logger.warn(`SendGrid not configured — OTP for ${to} was ${code}`);
+      this.logger.warn(`Email not configured — OTP for ${to} not sent`);
       return;
     }
     try {
-      await sgMail.send({
+      await this.send({
         to,
         from: this.from,
         subject: `Your access code: ${code}`,
@@ -101,8 +127,7 @@ export class MailService {
       });
       this.logger.log(`OTP sent to ${to}`);
     } catch (err: any) {
-      const body = err?.response?.body ? JSON.stringify(err.response.body) : err?.message;
-      this.logger.error(`OTP to ${to} failed: ${body}`);
+      this.logger.error(`OTP to ${to} failed: ${err?.message}`);
     }
   }
 
